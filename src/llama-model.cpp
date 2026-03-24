@@ -1676,6 +1676,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
 
                 // NextN/MTP parameters (GLM-OCR)
                 ml.get_key(LLM_KV_NEXTN_PREDICT_LAYERS, hparams.nextn_predict_layers, false);
+                GGML_ASSERT(hparams.nextn_predict_layers < hparams.n_layer && "nextn_predict_layers must be < n_layer");
 
                 // TODO: when MTP is implemented, this should probably be updated if needed
                 hparams.n_layer_kv_from_start = hparams.n_layer - hparams.nextn_predict_layers;
@@ -1709,6 +1710,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
 
                 // NextN/MTP parameters
                 ml.get_key(LLM_KV_NEXTN_PREDICT_LAYERS,        hparams.nextn_predict_layers, false);
+                GGML_ASSERT(hparams.nextn_predict_layers < hparams.n_layer && "nextn_predict_layers must be < n_layer");
 
                 // TODO: when MTP is implemented, this should probably be updated if needed
                 hparams.n_layer_kv_from_start = hparams.n_layer - hparams.nextn_predict_layers;
@@ -1755,6 +1757,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
 
                 // NextN/MTP parameters
                 ml.get_key(LLM_KV_NEXTN_PREDICT_LAYERS,        hparams.nextn_predict_layers, false);
+                GGML_ASSERT(hparams.nextn_predict_layers < hparams.n_layer && "nextn_predict_layers must be < n_layer");
 
                 // TODO: when MTP is implemented, this should probably be updated if needed
                 hparams.n_layer_kv_from_start = hparams.n_layer - hparams.nextn_predict_layers;
@@ -1929,6 +1932,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_LEADING_DENSE_BLOCK_COUNT,         hparams.n_layer_dense_lead, false);
 
                 ml.get_key(LLM_KV_NEXTN_PREDICT_LAYERS,              hparams.nextn_predict_layers, false);
+                GGML_ASSERT(hparams.nextn_predict_layers < hparams.n_layer && "nextn_predict_layers must be < n_layer");
 
                 switch (hparams.n_layer) {
                     case 32: type = LLM_TYPE_30B_A3B; break;
@@ -2057,7 +2061,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
 
                 switch (hparams.n_embd) {
                     case 768: type = LLM_TYPE_350M; break;
-                    case 1536: type = (hparams.n_embd == 2048 ? LLM_TYPE_7B_A1B : LLM_TYPE_1B); break;
+                    case 1536: type = (hparams.n_ff() == 512 ? LLM_TYPE_7B_A1B : LLM_TYPE_1B); break;
                     case 2048: case 2560: type = LLM_TYPE_3B; break;
                     case 4096: type = LLM_TYPE_32B; break;
                     default: type = LLM_TYPE_UNKNOWN;
@@ -2111,6 +2115,7 @@ void llama_model::load_hparams(llama_model_loader & ml) {
                 ml.get_key(LLM_KV_EXPERT_WEIGHTS_NORM,               hparams.expert_weights_norm, false);
                 ml.get_key(LLM_KV_EXPERT_GATING_FUNC,                hparams.expert_gating_func);
                 ml.get_key(LLM_KV_NEXTN_PREDICT_LAYERS,              hparams.nextn_predict_layers, false);
+                GGML_ASSERT(hparams.nextn_predict_layers < hparams.n_layer && "nextn_predict_layers must be < n_layer");
 
                 // TODO: when MTP is implemented, this should probably be updated if needed
                 hparams.n_layer_kv_from_start = hparams.n_layer - hparams.nextn_predict_layers;
