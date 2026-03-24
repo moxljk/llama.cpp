@@ -687,7 +687,15 @@ llama_model_loader::llama_model_loader(
 
             n_type[type]++;
 
-            if (n_type_max < n_type[type]) {
+            // Auxiliary integer payload tensors (for example zipserv bitmaps and offsets)
+            // should not determine the model's advertised file type.
+            const bool participates_in_ftype_guess =
+                    type != GGML_TYPE_I8 &&
+                    type != GGML_TYPE_I16 &&
+                    type != GGML_TYPE_I32 &&
+                    type != GGML_TYPE_I64;
+
+            if (participates_in_ftype_guess && n_type_max < n_type[type]) {
                 n_type_max = n_type[type];
                 type_max   = type;
             }
@@ -864,7 +872,9 @@ static bool weight_buft_supported(const llama_hparams & hparams, ggml_tensor * w
     }
 
     ggml_init_params params = {
-        /*.mem_size   =*/ ggml_tensor_overhead()*8,
+        // keep some extra headroom for op-specific probe graphs such as zipserv,
+        // which need more placeholder tensors than the ordinary dense cases.
+        /*.mem_size   =*/ ggml_tensor_overhead()*16,
         /*.mem_buffer =*/ NULL,
         /*.no_alloc   =*/ true,
     };
@@ -979,6 +989,44 @@ static bool weight_buft_supported(const llama_hparams & hparams, ggml_tensor * w
         case GGML_OP_SCALE:
             {
                 op_tensor = ggml_scale(ctx, w, 1.0f);
+            } break;
+        case GGML_OP_MUL_MAT_ZIPSERV:
+            {
+                // Zipserv weights are loaded as individual payload tensors, but buffer
+                // compatibility is checked one tensor at a time. Build a minimal dummy
+                // zipserv op so the backend can answer support for the block semantics.
+                ggml_tensor * sign_mantissa       = ggml_new_tensor_1d(ctx, GGML_TYPE_I8,   16);
+                ggml_tensor * compressed_full     = ggml_new_tensor_1d(ctx, GGML_TYPE_BF16, 16);
+                ggml_tensor * bitmap1             = ggml_new_tensor_1d(ctx, GGML_TYPE_I64,  16);
+                ggml_tensor * bitmap2             = ggml_new_tensor_1d(ctx, GGML_TYPE_I64,  16);
+                ggml_tensor * bitmap3             = ggml_new_tensor_1d(ctx, GGML_TYPE_I64,  16);
+                ggml_tensor * tile_offsets_median = ggml_new_tensor_1d(ctx, GGML_TYPE_I32,  16);
+                ggml_tensor * tile_offsets_global = ggml_new_tensor_1d(ctx, GGML_TYPE_I32,  16);
+                ggml_tensor * b                   = ggml_new_tensor_2d(ctx, GGML_TYPE_F32,  16, 16);
+                int32_t op_params[ZIPSERV_OPPARAM_COUNT] = { 0 };
+
+                switch (w->type) {
+                    case GGML_TYPE_I8:   sign_mantissa       = w; break;
+                    case GGML_TYPE_BF16: compressed_full     = w; break;
+                    case GGML_TYPE_I64:  bitmap1             = w; break;
+                    case GGML_TYPE_I32:  tile_offsets_median = w; break;
+                    default:
+                        GGML_ABORT("%s: unsupported tensor type %s for zipserv probe tensor %s",
+                                __func__, ggml_type_name(w->type), w->name);
+                }
+
+                op_tensor = ggml_mul_mat_zipserv(
+                        ctx,
+                        sign_mantissa,
+                        compressed_full,
+                        bitmap1,
+                        bitmap2,
+                        bitmap3,
+                        tile_offsets_median,
+                        tile_offsets_global,
+                        b,
+                        op_params,
+                        16);
             } break;
         default:
             GGML_ABORT("%s: missing test for op %s for tensor %s", __func__, ggml_op_name(op), w->name);

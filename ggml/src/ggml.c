@@ -982,6 +982,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "L2_NORM",
 
     "MUL_MAT",
+    "MUL_MAT_ZIPSERV",
     "MUL_MAT_ID",
     "OUT_PROD",
 
@@ -1057,7 +1058,7 @@ static const char * GGML_OP_NAME[GGML_OP_COUNT] = {
     "GLU",
 };
 
-static_assert(GGML_OP_COUNT == 96, "GGML_OP_COUNT != 96");
+static_assert(GGML_OP_COUNT == 97, "GGML_OP_COUNT != 97");
 
 static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "none",
@@ -1092,6 +1093,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "l2_norm(x)",
 
     "X*Y",
+    "zipserv(X,Y)",
     "X[i]*Y",
     "X*Y",
 
@@ -1167,7 +1169,7 @@ static const char * GGML_OP_SYMBOL[GGML_OP_COUNT] = {
     "glu(x)",
 };
 
-static_assert(GGML_OP_COUNT == 96, "GGML_OP_COUNT != 96");
+static_assert(GGML_OP_COUNT == 97, "GGML_OP_COUNT != 97");
 
 static_assert(GGML_OP_POOL_COUNT == 2, "GGML_OP_POOL_COUNT != 2");
 
@@ -3201,6 +3203,42 @@ struct ggml_tensor * ggml_l2_norm_inplace(
         struct ggml_tensor  * a,
         float                 eps) {
     return ggml_l2_norm_impl(ctx, a, eps, true);
+}
+
+// ggml_mul_mat_zipserv
+struct ggml_tensor * ggml_mul_mat_zipserv(
+        struct ggml_context * ctx,
+        struct ggml_tensor * SignMantissa,
+        struct ggml_tensor * CompressedFull,
+        struct ggml_tensor * Bitmap1,
+        struct ggml_tensor * Bitmap2,
+        struct ggml_tensor * Bitmap3,
+        struct ggml_tensor * TileOffsets_Median,
+        struct ggml_tensor * TileOffsets_Global,
+        struct ggml_tensor * b,
+        const int32_t * zipserv_op_params,
+        int M
+) {
+    const int64_t ne[4] = { M, b->ne[1], b->ne[2], b->ne[3] };
+    struct ggml_tensor * result = ggml_new_tensor(
+                                            ctx,
+                                            GGML_TYPE_F32,
+                                            4,
+                                            ne);
+    result -> op    = GGML_OP_MUL_MAT_ZIPSERV;
+    result -> src[ZIPSERV_SRC_SIGN_MANTISSA_IDX] = SignMantissa;
+    result -> src[ZIPSERV_SRC_COMPRESSED_FULL_IDX] = CompressedFull;
+    result -> src[ZIPSERV_SRC_BITMAP1_IDX] = Bitmap1;
+    result -> src[ZIPSERV_SRC_BITMAP2_IDX] = Bitmap2;
+    result -> src[ZIPSERV_SRC_BITMAP3_IDX] = Bitmap3;
+    result -> src[ZIPSERV_SRC_TILE_OFFSETS_MEDIAN_IDX] = TileOffsets_Median;
+    result -> src[ZIPSERV_SRC_TILE_OFFSETS_GLOBAL_IDX] = TileOffsets_Global;
+    result -> src[ACTIVATION] = b;
+    for (int i = 0; i < ZIPSERV_OPPARAM_COUNT; i++) {
+        ggml_set_op_params_i32(result, i, zipserv_op_params[i]);
+    }
+
+    return result;
 }
 
 // ggml_mul_mat

@@ -501,6 +501,7 @@ extern "C" {
         GGML_OP_L2_NORM,
 
         GGML_OP_MUL_MAT,
+        GGML_OP_MUL_MAT_ZIPSERV,
         GGML_OP_MUL_MAT_ID,
         GGML_OP_OUT_PROD,
 
@@ -1400,6 +1401,38 @@ extern "C" {
             struct ggml_tensor  * a,
             struct ggml_tensor  * b,
             float                 eps);
+
+    // ZIPSERV     
+    enum ZIPSERV_PARAM_INDEX {
+        ZIPSERV_OPPARAM_MAX_HIGH_FREQ_COUNT_IDX,
+        ZIPSERV_OPPARAM_MAX_FULL_COUNT_IDX,
+        ZIPSERV_OPPARAM_START_EXP_IDX,
+        ZIPSERV_OPPARAM_COUNT,
+    };
+    enum ZIPSERV_SRC_INDEX {
+        ZIPSERV_SRC_SIGN_MANTISSA_IDX,
+        ZIPSERV_SRC_COMPRESSED_FULL_IDX,
+        ZIPSERV_SRC_BITMAP1_IDX,
+        ZIPSERV_SRC_BITMAP2_IDX,
+        ZIPSERV_SRC_BITMAP3_IDX,
+        ZIPSERV_SRC_TILE_OFFSETS_MEDIAN_IDX,
+        ZIPSERV_SRC_TILE_OFFSETS_GLOBAL_IDX,
+        ACTIVATION,
+        ZIPSERV_SRC_COUNT,
+    };
+
+    GGML_API struct ggml_tensor * ggml_mul_mat_zipserv(
+        struct ggml_context * ctx,
+        struct ggml_tensor * SignMantissa,
+        struct ggml_tensor * CompressedFull,
+        struct ggml_tensor * Bitmap1,
+        struct ggml_tensor * Bitmap2,
+        struct ggml_tensor * Bitmap3,
+        struct ggml_tensor * TileOffsets_Median,
+        struct ggml_tensor * TileOffsets_Global,
+        struct ggml_tensor * b,
+        const int32_t * op_params,
+        int M);
 
     // A: k columns, n rows => [ne03, ne02, n, k]
     // B: k columns, m rows  (i.e. we transpose it internally) => [ne03 * x, ne02 * y, m, k]

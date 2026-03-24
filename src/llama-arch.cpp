@@ -7,6 +7,7 @@
 #include <vector>
 
 static const std::map<llm_arch, const char *> LLM_ARCH_NAMES = {
+    { LLM_ARCH_QWEN3ZIP,         "qwen3zip"         },
     { LLM_ARCH_CLIP,             "clip"             }, // dummy, only used by llama-quantize
     { LLM_ARCH_LLAMA,            "llama"            },
     { LLM_ARCH_LLAMA4,           "llama4"           },
@@ -345,12 +346,19 @@ static const std::map<llm_tensor, const char *> LLM_TENSOR_NAMES = {
     { LLM_TENSOR_ATTN_K,                                 "blk.%d.attn_k" },
     { LLM_TENSOR_ATTN_V,                                 "blk.%d.attn_v" },
     { LLM_TENSOR_ATTN_OUT,                               "blk.%d.attn_output" },
+    { LLM_TENSOR_ATTN_Q_ZIPSERV,                         "blk.%d.attn_q" },
+    { LLM_TENSOR_ATTN_K_ZIPSERV,                         "blk.%d.attn_k" },
+    { LLM_TENSOR_ATTN_V_ZIPSERV,                         "blk.%d.attn_v" },
+    { LLM_TENSOR_ATTN_OUT_ZIPSERV,                       "blk.%d.attn_output" },
     { LLM_TENSOR_ATTN_ROT_EMBD,                          "blk.%d.attn_rot_embd" },
     { LLM_TENSOR_FFN_GATE_INP,                           "blk.%d.ffn_gate_inp" },
     { LLM_TENSOR_FFN_NORM,                               "blk.%d.ffn_norm" },
     { LLM_TENSOR_FFN_GATE,                               "blk.%d.ffn_gate" },
     { LLM_TENSOR_FFN_DOWN,                               "blk.%d.ffn_down" },
     { LLM_TENSOR_FFN_UP,                                 "blk.%d.ffn_up" },
+    { LLM_TENSOR_FFN_GATE_ZIPSERV,                       "blk.%d.ffn_gate" },
+    { LLM_TENSOR_FFN_DOWN_ZIPSERV,                       "blk.%d.ffn_down" },
+    { LLM_TENSOR_FFN_UP_ZIPSERV,                         "blk.%d.ffn_up" },
     { LLM_TENSOR_FFN_GATE_EXP,                           "blk.%d.ffn_gate.%d" },
     { LLM_TENSOR_FFN_DOWN_EXP,                           "blk.%d.ffn_down.%d" },
     { LLM_TENSOR_FFN_UP_EXP,                             "blk.%d.ffn_up.%d" },
@@ -971,6 +979,24 @@ static std::set<llm_tensor> llm_get_tensor_names(llm_arch arch) {
                 LLM_TENSOR_FFN_GATE,
                 LLM_TENSOR_FFN_DOWN,
                 LLM_TENSOR_FFN_UP,
+            };
+        case LLM_ARCH_QWEN3ZIP:
+            return {
+                LLM_TENSOR_TOKEN_EMBD,
+                LLM_TENSOR_OUTPUT_NORM,
+                LLM_TENSOR_OUTPUT,
+                LLM_TENSOR_CLS_OUT,
+                LLM_TENSOR_ATTN_NORM,
+                LLM_TENSOR_ATTN_Q_ZIPSERV,
+                LLM_TENSOR_ATTN_Q_NORM,
+                LLM_TENSOR_ATTN_K_ZIPSERV,
+                LLM_TENSOR_ATTN_K_NORM,
+                LLM_TENSOR_ATTN_V_ZIPSERV,
+                LLM_TENSOR_ATTN_OUT_ZIPSERV,
+                LLM_TENSOR_FFN_NORM,
+                LLM_TENSOR_FFN_GATE_ZIPSERV,
+                LLM_TENSOR_FFN_DOWN_ZIPSERV,
+                LLM_TENSOR_FFN_UP_ZIPSERV,
             };
         case LLM_ARCH_QWEN3MOE:
         case LLM_ARCH_QWEN3VLMOE:
@@ -2583,10 +2609,17 @@ static const std::map<llm_tensor, llm_tensor_info> LLM_TENSOR_INFOS = {
     {LLM_TENSOR_ATTN_V,                     {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_ATTN_QKV,                   {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_ATTN_OUT,                   {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
+    {LLM_TENSOR_ATTN_Q_ZIPSERV,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT_ZIPSERV}},
+    {LLM_TENSOR_ATTN_K_ZIPSERV,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT_ZIPSERV}},
+    {LLM_TENSOR_ATTN_V_ZIPSERV,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT_ZIPSERV}},
+    {LLM_TENSOR_ATTN_OUT_ZIPSERV,           {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT_ZIPSERV}},
     {LLM_TENSOR_ATTN_GATE,                  {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_FFN_GATE,                   {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_FFN_DOWN,                   {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_FFN_UP,                     {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
+    {LLM_TENSOR_FFN_GATE_ZIPSERV,           {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT_ZIPSERV}},
+    {LLM_TENSOR_FFN_DOWN_ZIPSERV,           {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT_ZIPSERV}},
+    {LLM_TENSOR_FFN_UP_ZIPSERV,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT_ZIPSERV}},
     {LLM_TENSOR_FFN_DOWN_SHEXP,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_FFN_GATE_SHEXP,             {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},
     {LLM_TENSOR_FFN_UP_SHEXP,               {LLM_TENSOR_LAYER_REPEATING, GGML_OP_MUL_MAT}},

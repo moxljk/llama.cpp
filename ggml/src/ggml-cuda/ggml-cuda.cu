@@ -63,6 +63,10 @@
 #include "ggml-cuda/fill.cuh"
 #include "ggml.h"
 
+#ifdef GGML_USE_CUDA_ZIPSERV
+#include "L_API.cuh"
+#endif
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -2320,6 +2324,135 @@ static void ggml_cuda_mul_mat(ggml_backend_cuda_context & ctx, const ggml_tensor
     }
 }
 
+static void ggml_cuda_mul_mat_zipserv(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
+#ifndef GGML_USE_CUDA_ZIPSERV
+    GGML_UNUSED(ctx);
+    GGML_UNUSED(dst);
+    GGML_ABORT("GGML_OP_MUL_MAT_ZIPSERV requires building ggml-cuda with GGML_CUDA_ZIPSERV=ON");
+#else
+    const ggml_tensor * sign_mantissa       = dst->src[ZIPSERV_SRC_SIGN_MANTISSA_IDX];
+    const ggml_tensor * compressed_full     = dst->src[ZIPSERV_SRC_COMPRESSED_FULL_IDX];
+    const ggml_tensor * bitmap1             = dst->src[ZIPSERV_SRC_BITMAP1_IDX];
+    const ggml_tensor * bitmap2             = dst->src[ZIPSERV_SRC_BITMAP2_IDX];
+    const ggml_tensor * bitmap3             = dst->src[ZIPSERV_SRC_BITMAP3_IDX];
+    const ggml_tensor * tile_offsets_median = dst->src[ZIPSERV_SRC_TILE_OFFSETS_MEDIAN_IDX];
+    const ggml_tensor * tile_offsets_global = dst->src[ZIPSERV_SRC_TILE_OFFSETS_GLOBAL_IDX];
+    const ggml_tensor * activation          = dst->src[ACTIVATION];
+
+    GGML_ASSERT(sign_mantissa       != nullptr);
+    GGML_ASSERT(compressed_full     != nullptr);
+    GGML_ASSERT(bitmap1             != nullptr);
+    GGML_ASSERT(bitmap2             != nullptr);
+    GGML_ASSERT(bitmap3             != nullptr);
+    GGML_ASSERT(tile_offsets_median != nullptr);
+    GGML_ASSERT(tile_offsets_global != nullptr);
+    GGML_ASSERT(activation          != nullptr);
+
+    GGML_ASSERT(dst->type        == GGML_TYPE_F32);
+    GGML_ASSERT(ggml_is_contiguous(activation));
+    GGML_ASSERT(ggml_is_contiguous(dst));
+
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(sign_mantissa->buffer->buft));
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(compressed_full->buffer->buft));
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(bitmap1->buffer->buft));
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(bitmap2->buffer->buft));
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(bitmap3->buffer->buft));
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(tile_offsets_median->buffer->buft));
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(tile_offsets_global->buffer->buft));
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(activation->buffer->buft));
+    GGML_ASSERT(!ggml_backend_buft_is_cuda_split(dst->buffer->buft));
+
+    GGML_ASSERT(dst->ne[1] == activation->ne[1]);
+    GGML_ASSERT(dst->ne[2] == activation->ne[2]);
+    GGML_ASSERT(dst->ne[3] == activation->ne[3]);
+
+    const int32_t max_high_freq_count = ggml_get_op_params_i32(dst, ZIPSERV_OPPARAM_MAX_HIGH_FREQ_COUNT_IDX);
+    const int32_t max_full_count      = ggml_get_op_params_i32(dst, ZIPSERV_OPPARAM_MAX_FULL_COUNT_IDX);
+    const uint8_t start_exp           = (uint8_t) ggml_get_op_params_i32(dst, ZIPSERV_OPPARAM_START_EXP_IDX);
+
+    const int M_Global = (int) dst->ne[0];
+    const int N_Global = (int) activation->ne[1];
+    const int K_Global = (int) activation->ne[0];
+    // todo zipserv: 这里使用split_k = 1
+    const int Split_K  = 1;
+
+    const uint8_t     * sign_mantissa_d       = (const uint8_t *) sign_mantissa->data;
+    const nv_bfloat16 * compressed_full_d     = (const nv_bfloat16 *) compressed_full->data;
+    const uint64_t    * bitmap1_d             = (const uint64_t *) bitmap1->data;
+    const uint64_t    * bitmap2_d             = (const uint64_t *) bitmap2->data;
+    const uint64_t    * bitmap3_d             = (const uint64_t *) bitmap3->data;
+    const int         * tile_offsets_median_d = (const int *) tile_offsets_median->data;
+    const int         * tile_offsets_global_d = (const int *) tile_offsets_global->data;
+
+    ggml_cuda_pool_alloc<nv_bfloat16> activation_as_bf16_alloc;
+    const nv_bfloat16 * activation_d = nullptr;
+    if (activation->type == GGML_TYPE_BF16) {
+        activation_d = (const nv_bfloat16 *) activation->data;
+    } else {
+        const to_bf16_cuda_t to_bf16_cuda = ggml_get_to_bf16_cuda(activation->type);
+        GGML_ASSERT(to_bf16_cuda != nullptr);
+        const size_t ne = (size_t) ggml_nelements(activation);
+        activation_as_bf16_alloc.alloc(ctx.pool(), ne);
+        to_bf16_cuda(activation->data, activation_as_bf16_alloc.get(), ne, ctx.stream());
+        activation_d = activation_as_bf16_alloc.get();
+    }
+
+    ggml_cuda_pool_alloc<nv_bfloat16> dst_bf16_alloc;
+    nv_bfloat16 * dst_bf16_d = nullptr;
+    if (dst->type == GGML_TYPE_BF16) {
+        dst_bf16_d = (nv_bfloat16 *) dst->data;
+    } else {
+        dst_bf16_alloc.alloc(ctx.pool(), (size_t) M_Global * N_Global);
+        dst_bf16_d = dst_bf16_alloc.get();
+    }
+
+    ggml_cuda_pool_alloc<nv_bfloat16> reduction_workspace_alloc;
+    nv_bfloat16 * reduction_workspace_d = nullptr;
+    if (Split_K > 1) {
+        reduction_workspace_alloc.alloc(ctx.pool(), (size_t) M_Global * N_Global * Split_K);
+        reduction_workspace_d = reduction_workspace_alloc.get();
+    }
+
+    CUDA_CHECK(BF16TripleBitmap_MM_API(
+            ctx.stream(),
+            sign_mantissa_d,
+            compressed_full_d,
+            bitmap1_d,
+            bitmap2_d,
+            bitmap3_d,
+            tile_offsets_median_d,
+            tile_offsets_global_d,
+            max_high_freq_count,
+            max_full_count,
+            start_exp,
+            activation_d,
+            dst_bf16_d,
+            M_Global,
+            N_Global,
+            K_Global,
+            reduction_workspace_d,
+            Split_K));
+
+    if (dst->type != GGML_TYPE_BF16) {
+        const size_t ne = (size_t) ggml_nelements(dst);
+        switch (dst->type) {
+            case GGML_TYPE_F16: {
+                const to_fp16_cuda_t to_fp16_cuda = ggml_get_to_fp16_cuda(GGML_TYPE_BF16);
+                GGML_ASSERT(to_fp16_cuda != nullptr);
+                to_fp16_cuda(dst_bf16_d, (half *) dst->data, ne, ctx.stream());
+            } break;
+            case GGML_TYPE_F32: {
+                const to_fp32_cuda_t to_fp32_cuda = ggml_get_to_fp32_cuda(GGML_TYPE_BF16);
+                GGML_ASSERT(to_fp32_cuda != nullptr);
+                to_fp32_cuda(dst_bf16_d, (float *) dst->data, ne, ctx.stream());
+            } break;
+            default:
+                GGML_ABORT("GGML_OP_MUL_MAT_ZIPSERV: unsupported dst type %s", ggml_type_name(dst->type));
+        }
+    }
+#endif
+}
+
 static void ggml_cuda_mul_mat_id(ggml_backend_cuda_context & ctx, ggml_tensor * dst) {
     const ggml_tensor * src0 = dst->src[0];
     const ggml_tensor * src1 = dst->src[1];
@@ -2673,6 +2806,9 @@ static bool ggml_cuda_compute_forward(ggml_backend_cuda_context & ctx, struct gg
             break;
         case GGML_OP_MUL_MAT:
             ggml_cuda_mul_mat(ctx, dst->src[0], dst->src[1], dst);
+            break;
+        case GGML_OP_MUL_MAT_ZIPSERV:
+            ggml_cuda_mul_mat_zipserv(ctx, dst);
             break;
         case GGML_OP_MUL_MAT_ID:
             ggml_cuda_mul_mat_id(ctx, dst);
@@ -4737,6 +4873,16 @@ static bool ggml_backend_cuda_device_supports_op(ggml_backend_dev_t dev, const g
                     return false;
             }
             break;
+        case GGML_OP_MUL_MAT_ZIPSERV:
+            {
+                // zipserv nodes do not follow the ordinary mul_mat src[0]/src[1]
+                // contract: src[0..6] are payload tensors and src[7] is the
+                // activation. Let the dedicated zipserv CUDA path validate the
+                // stricter runtime requirements instead of reusing the regular
+                // mul_mat support checks here.
+                return true;
+            }
+            break;
         case GGML_OP_MUL_MAT:
         case GGML_OP_MUL_MAT_ID:
             {
@@ -5062,6 +5208,7 @@ static int64_t get_op_batch_size(const ggml_tensor * op) {
         case GGML_OP_GET_ROWS:
             return 0;
         case GGML_OP_MUL_MAT:
+        case GGML_OP_MUL_MAT_ZIPSERV:
             return op->ne[1];
         case GGML_OP_MUL_MAT_ID:
         case GGML_OP_ROPE:

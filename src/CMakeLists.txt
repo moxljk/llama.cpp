@@ -33,6 +33,7 @@ add_library(llama
             llama-quant.cpp
             llama-sampler.cpp
             llama-vocab.cpp
+            llama-zipserv.cpp
             unicode-data.cpp
             unicode.cpp
             unicode.h
@@ -124,6 +125,7 @@ add_library(llama
             models/qwen2moe.cpp
             models/qwen2vl.cpp
             models/qwen3.cpp
+            models/qwen3zip.cpp
             models/qwen35.cpp
             models/qwen35moe.cpp
             models/qwen3moe.cpp

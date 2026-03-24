@@ -5,6 +5,15 @@ find_package(CUDAToolkit)
 if (CUDAToolkit_FOUND)
     message(STATUS "CUDA Toolkit found")
 
+    if (GGML_CUDA_ZIPSERV)
+        if (ZIPSERV_CUDA_INCLUDE_DIR STREQUAL "")
+            message(FATAL_ERROR "GGML_CUDA_ZIPSERV=ON requires ZIPSERV_CUDA_INCLUDE_DIR")
+        endif()
+        if (ZIPSERV_CUDA_LIBRARY STREQUAL "")
+            message(FATAL_ERROR "GGML_CUDA_ZIPSERV=ON requires ZIPSERV_CUDA_LIBRARY")
+        endif()
+    endif()
+
     if (NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         # native == GPUs available at build time
         # 50     == Maxwell, lowest CUDA 12 standard
@@ -128,6 +137,12 @@ if (CUDAToolkit_FOUND)
                              ${GGML_HEADERS_CUDA}
                              ${GGML_SOURCES_CUDA}
                             )
+
+    if (GGML_CUDA_ZIPSERV)
+        target_include_directories(ggml-cuda PRIVATE ${ZIPSERV_CUDA_INCLUDE_DIR})
+        target_link_libraries(ggml-cuda PRIVATE ${ZIPSERV_CUDA_LIBRARY})
+        target_compile_definitions(ggml-cuda PRIVATE GGML_USE_CUDA_ZIPSERV)
+    endif()
 
     add_compile_definitions(GGML_CUDA_PEER_MAX_BATCH_SIZE=${GGML_CUDA_PEER_MAX_BATCH_SIZE})
 

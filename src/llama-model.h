@@ -208,7 +208,35 @@ struct llama_layer_nextn {
     struct ggml_tensor * shared_head_norm = nullptr;
 };
 
+// zipserv
+struct llama_block_zipserv {
+    // tensor
+    struct ggml_tensor * sign_mantissa       = nullptr;
+    struct ggml_tensor * compressed_full     = nullptr;
+    struct ggml_tensor * bitmap1             = nullptr;
+    struct ggml_tensor * bitmap2             = nullptr;
+    struct ggml_tensor * bitmap3             = nullptr;
+    struct ggml_tensor * tile_offsets_median = nullptr;
+    struct ggml_tensor * tile_offsets_global = nullptr;
+
+    // metadata
+    uint32_t rows                = 0;
+    uint32_t cols                = 0;
+    uint32_t max_high_freq_count = 0;
+    uint32_t max_full_count      = 0;
+    uint32_t start_exp           = 0;
+};
+
 struct llama_layer {
+    // zipserv
+    llama_block_zipserv wq_zipserv;
+    llama_block_zipserv wk_zipserv;
+    llama_block_zipserv wv_zipserv;
+    llama_block_zipserv wo_zipserv;
+    llama_block_zipserv ffn_gate_zipserv;
+    llama_block_zipserv ffn_down_zipserv;
+    llama_block_zipserv ffn_up_zipserv;
+
     // normalization
     struct ggml_tensor * attn_norm       = nullptr;
     struct ggml_tensor * attn_norm_b     = nullptr;
